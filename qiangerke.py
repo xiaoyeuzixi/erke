@@ -7,6 +7,12 @@ from PIL import Image
 import ddddocr
 from PIL import ImageEnhance
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+
+stop_event = threading.Event()
 
 # 输入SSID
 SSID = str(input("请输入SSID:"))
@@ -156,52 +162,60 @@ def wait_for_timestamp(timestamp):
     print(f"当前时间 {current_time} 达到或超过目标时间 {timestamp}")
 
 def process_activity(activityID, timestamp, whitelist_id):
-    """处理每个活动的逻辑"""
-    wait_for_timestamp(timestamp)
-    current_time = int(time.time())
-
-    if current_time >= timestamp:
-        print(f"当前时间已达到时间戳 {timestamp}，执行活动ID: {activityID}")
-        if activityID not in whitelist_id:
-            s1, s2 = s1_2(activityID)
-            ver_code = code()  # 获取验证码
-            sign_up(activityID, ver_code, s1, s2)
-            whitelist_id.append(activityID)
-            time.sleep(30)
-        else:
-            print(f"活动ID {activityID} 在白名单中，跳过报名。")
-    else:
-        print(f"当前时间尚未达到时间戳 {timestamp}，跳过活动ID: {activityID}。")
+    while not stop_event.is_set():
+        print(f"处理活动ID: {activityID}，时间戳: {timestamp}")
+        time.sleep(1)  # 模拟活动处理时间
+        if stop_event.is_set():
+            print(f"活动ID: {activityID} 被停止")
+            break
 
 def main():
+    activities_data = activities()
+    ID = screening(activities_data)
+    print("可报名活动ID:", ID)
+
+    # id白名单
+    whitelist_id = []
+
+    # 时间戳名单
+    time_1 = timestamp_list(activities_data)
+    print("活动开始时间戳:", time_1)
+
+    # 使用线程池同时处理多个活动
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = []
+        for i in range(len(ID)):
+            activityID = ID[i]
+            timestamp = int(time_1[i])
+            futures.append(executor.submit(process_activity, activityID, timestamp, whitelist_id))
+
+        for future in as_completed(futures):
+            if stop_event.is_set():
+                break
+            try:
+                future.result()
+            except Exception as exc:
+                print(f"处理活动时发生错误: {exc}")
+
+def start_main_loop():
     while True:
-        activities_data = activities()
-        ID = screening(activities_data)
-        print("可报名活动ID:", ID)
-        
-        # id白名单
-        whitelist_id = []
-        
-        # 时间戳名单
-        time_1 = timestamp_list(activities_data)
-        print("活动开始时间戳:", time_1)
+        stop_event.clear()
+        main_thread = threading.Thread(target=main)
+        main_thread.start()
 
-        # 使用线程池同时处理多个活动
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = []
-            for i in range(len(ID)):
-                activityID = ID[i]
-                timestamp = int(time_1[i])
-                futures.append(executor.submit(process_activity, activityID, timestamp, whitelist_id))
-            
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as exc:
-                    print(f"处理活动时发生错误: {exc}")
-
-        print("等待1小时后刷新任务...")
+        # 等待1小时后停止当前任务
         time.sleep(3600)
 
+        # 设置停止事件来终止当前的任务线程
+        print("停止当前任务并刷新...")
+        stop_event.set()
+
+        # 等待任务线程结束
+        main_thread.join()
+
 if __name__ == '__main__':
-    main()
+    try:
+        start_main_loop()
+    except KeyboardInterrupt:
+        print("手动终止程序...")
+        stop_event.set()
