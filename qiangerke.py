@@ -6,251 +6,202 @@ from io import BytesIO
 from PIL import Image
 import ddddocr
 from PIL import ImageEnhance
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-
-
+# 输入SSID
 SSID = str(input("请输入SSID:"))
 print("ssid为:", SSID)
 
-timestamp = int(time.time())
 excluded_keywords = {'军事', '训练', '军', '名单', '工作', '体验', '华岩', '聚会', '赛', '跑'}
-excluded_keywords = {'军事'}
-
 
 def activities():
+    """获取可申请活动并保存到本地JSON文件"""
     url = 'https://2class.cqtbi.edu.cn/Student/Activity/getActivityCanApply.html'
-    hreader = {
-    'Cookie': f'SSID={SSID}',
+    headers = {
+        'Cookie': f'SSID={SSID}',
     }
+    response = requests.post(url, headers=headers)
+    activities = json.loads(response.text)
 
-    print(hreader)
-    data = {
-
-        }
-    response = requests.post(url, headers=hreader, data=data)
-    text = response.text
-    activities = json.loads(text)
-    #保存到本地
+    # 保存活动到文件
     with open('text.json', 'w', encoding='utf-8') as f:
         json.dump(activities, f, ensure_ascii=False, indent=4)
-    print(activities)
-    # 读取 JSON 文件
-    with open(r'e:\GitHub\二课网页\text.json', 'r', encoding='utf-8') as file:
-        data = json.load(file)
+    
+    print("活动数据已成功保存。")
+    return activities
 
-    # 假设活动数据在 'activities' 键中，需要根据实际情况调整
-    # 这里假设数据是以列表形式存在
-    activities = data  # 直接使用 data，因为你提供的例子没有包含活动列表的键
+def screening(activities):
+    """筛选出可申请的活动ID"""
+    activityID = []
+    for activity in activities:
+        if '报名未开始' in activity.get('status2Name', ''):
+            if not any(keyword in activity.get('activityName', '') for keyword in excluded_keywords):
+                activityID.append(activity['activityID'])
+                print(f'正在报名:', activity['activityName'])
+    return activityID
 
-    # 按照 applyStartDate 排序
-    sorted_activities = sorted(activities, key=lambda x: int(x['applyStartDate']))
+def timestamp_list(activities):
+    """获取可申请活动的时间戳"""
+    timestamps = []
+    for activity in activities:
+        if '报名未开始' in activity.get('status2Name', ''):
+            if not any(keyword in activity.get('activityName', '') for keyword in excluded_keywords):
+                timestamps.append(activity['applyStartDate'])
+                print(f'活动开始时间:', activity['applyStartDate'])
+    return timestamps
 
-    # 重新保存到 JSON 文件
-    with open(r'e:\GitHub\二课网页\text.json', 'w', encoding='utf-8') as file:
-        json.dump(sorted_activities, file, ensure_ascii=False, indent=4)
-
-    print("数据已成功排序并保存。")
-
-
-def screening():
-    with open('text.json', 'r', encoding='utf-8') as f:
-        activities = json.load(f)
-
-        # 筛选出可申请的活动
-        activityID = []
-        for activity in activities:
-            if '报名' in activity.get('status2Name', ''):
-                if not any(keyword in activity.get('activityName', '') for keyword in excluded_keywords):
-                    activityID.append(activity['activityID'])
-                    print(f'正在报名:',activity['activityName'])
-        print(activityID)
-        return activityID
-
-#获取时间戳    
-def timestamp_list():
-    with open('text.json', 'r', encoding='utf-8') as f:
-        activities = json.load(f)
-
-        # 筛选出可申请的活动
-        timestamps = []
-        for activity in activities:
-            if '报名' in activity.get('status2Name', ''):
-                if not any(keyword in activity.get('activityName', '') for keyword in excluded_keywords):
-                    timestamps.append(activity['applyStartDate'])
-                    print(f'正在报名:',activity['applyStartDate'])
-        print(timestamps)
-        return timestamps
-
-
-
-def sign_up():
+def sign_up(activityID, ver_code, s1, s2):
+    """进行报名请求"""
     url = "https://2class.cqtbi.edu.cn/Student/activity/applyGo.html"
-
-    # 设置请求头
     headers = {
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "Origin": "https://2class.cqtbi.edu.cn",
-        "Referer": "https://2class.cqtbi.edu.cn/Student/Activity/apply.html?activityID=85479&retUrl=JTJGU3R1ZGVudCUyRkFjdGl2aXR5JTJGaW5kZXguaHRtbA==",
+        "Referer": f"https://2class.cqtbi.edu.cn/Student/Activity/apply.html?activityID={activityID}&retUrl=JTJGU3R1ZGVudCUyRkFjdGl2aXR5JTJGaW5kZXguaHRtbA==",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
         "Connection": "keep-alive",
     }
 
     # 设置请求体的数据
     data = {
-        "activityID": {activityID},
-        "activityApplyRand": {ver_code},
-        "s1": {s1},
-        "s2": f"{s2}",
+        "activityID": activityID,
+        "activityApplyRand": ver_code,
+        "s1": s1,
+        "s2": s2,
     }
 
     # 设置 cookies
     cookies = {
-        "SSID": f"{SSID}",
+        "SSID": SSID,
         "activityApplyTimes": "1",
-        "activityApplyTimeStart": f"{timestamp}",
+        "activityApplyTimeStart": str(int(time.time())),  # 使用当前时间戳
     }
 
     try:
-        # 发送 POST 请求
         response = requests.post(url, headers=headers, data=data, cookies=cookies)
-        
-        # 检查响应状态码
-        response.raise_for_status()  # 如果响应代码不是200，将抛出异常
-        
-        # 打印响应结果
-        print("Status Code:", response.status_code)
-        print("Response Text:", response.text)
-
+        response.raise_for_status()
+        print("报名状态:", response.text)
     except requests.exceptions.HTTPError as http_err:
         print(f"HTTP错误发生: {http_err}")
     except Exception as err:
         print(f"发生错误: {err}")
 
-def s1_2():
-    
-
+def s1_2(activityID):
+    """获取s1和s2"""
     url = f'https://2class.cqtbi.edu.cn/Student/Activity/apply.html?activityID={activityID}&retUrl=JTJGU3R1ZGVudCUyRkFjdGl2aXR5JTJGaW5kZXguaHRtbA=='
     cookies = {
-
-        'SSID':f'{SSID}',
-        'activityApplyTimes':'1',
-        'activityApplyTimeStart':f'{timestamp}',
-        }
-
+        'SSID': SSID,
+        'activityApplyTimes': '1',
+        'activityApplyTimeStart': str(int(time.time())),
+    }
     response = requests.get(url, cookies=cookies)
-    text = response.text
-    s1 = ''.join(re.findall(r's1:"(.*?)"', text))  # 将s1转化为字符串
-    s2 = ''.join(re.findall(r's2:"(.*?)"', text))  # 将s2转化为字符串
-    print(s1, s2)
+    s1 = ''.join(re.findall(r's1:"(.*?)"', response.text))
+    s2 = ''.join(re.findall(r's2:"(.*?)"', response.text))
     return s1, s2
 
 def image():
+    """获取验证码图片"""
     cookies = {
-    'SSID': 'jiqph7llau90l514d3kokgfnr5',
-    'activityApplyTimes': '2',
-    'activityApplyTimeStart': str(timestamp),  # 确保值是字符串
+        'SSID': SSID,
+        'activityApplyTimes': '1',
+        'activityApplyTimeStart': str(int(time.time())),
     }
-
-    # 目标 URL
     url = "https://2class.cqtbi.edu.cn/Student/Activity/verifycode.html"
-
-    # 发送请求，获取图片
     response = requests.get(url, cookies=cookies)
 
-    # 检查请求是否成功
-    if response.status_code == 200:
-        # 判断响应内容是否是图片
-        content_type = response.headers.get('Content-Type')
-        if 'image' in content_type:  # 检查内容类型是否为图片
-            img = Image.open(BytesIO(response.content))
-            img.save("1.png")  # 直接保存图片为文件
-            print("图片已保存。")
-        else:
-            print("返回的内容不是图片。")
+    if response.status_code == 200 and 'image' in response.headers.get('Content-Type'):
+        img = Image.open(BytesIO(response.content))
+        img.save("1.png")
+        print("验证码图片已保存。")
     else:
         print(f"无法获取图片，状态码: {response.status_code}")
 
 def code():
+    """处理验证码并返回识别结果"""
     image = Image.open('1.png')
-
-    # 转换为 RGB 模式
     rgb_image = image.convert('RGB')
-
-    # 获取图像的宽度和高度
     width, height = rgb_image.size
-
-    # 创建一个新的空白图像，用于存放处理后的像素
     processed_image = Image.new('RGB', (width, height))
 
-    # 遍历每个像素并处理
     for x in range(width):
         for y in range(height):
             pixel = rgb_image.getpixel((x, y))
             r, g, b = pixel
-            # 如果像素接近白色，则变为黑色
-            if r > 200 and g > 200 and b > 200:
-                processed_image.putpixel((x, y), (0, 0, 0))  # 转换为黑色
-            else:
-                processed_image.putpixel((x, y), (255, 255, 255))  # 其他颜色变为白色
+            processed_image.putpixel((x, y), (0, 0, 0) if r > 200 and g > 200 and b > 200 else (255, 255, 255))
 
-    # 将图像转换为灰度
     gray_image = processed_image.convert('L')
-
-    # 进行二值化处理
-    threshold = 128  # 选择阈值
+    threshold = 128
     binary_image = gray_image.point(lambda p: 255 if p > threshold else 0)
 
-    # 增强对比度
     enhancer = ImageEnhance.Contrast(binary_image)
-    enhanced_image = enhancer.enhance(2.0)  # 可调整对比度倍数
-
-    # 保存处理后的图像（可选，检查效果）
+    enhanced_image = enhancer.enhance(2.0)
     enhanced_image.save('processed_image.png')
-
 
     ocr = ddddocr.DdddOcr()
     with open('processed_image.png', 'rb') as f:
         img_bytes = f.read()
     res = ocr.classification(img_bytes)
 
-    verification_code = re.findall(r'\d+', res)  # 提取所有数字
-    if verification_code:
-        print("验证码是:", verification_code[0])  # 输出第一个找到了的验证码
+    verification_code = re.findall(r'\d+', res)
+    return verification_code[0] if verification_code else None
+
+def wait_for_timestamp(timestamp):
+    """等待直到目标时间戳"""
+    current_time = int(time.time())
+    while current_time < timestamp:
+        time_diff = timestamp - current_time
+        print(f"等待 {time_diff} 秒直到 {timestamp}，当前时间: {current_time}")
+        time.sleep(min(time_diff, 2))
+        current_time = int(time.time())
+    print(f"当前时间 {current_time} 达到或超过目标时间 {timestamp}")
+
+def process_activity(activityID, timestamp, whitelist_id):
+    """处理每个活动的逻辑"""
+    wait_for_timestamp(timestamp)
+    current_time = int(time.time())
+
+    if current_time >= timestamp:
+        print(f"当前时间已达到时间戳 {timestamp}，执行活动ID: {activityID}")
+        if activityID not in whitelist_id:
+            s1, s2 = s1_2(activityID)
+            ver_code = code()  # 获取验证码
+            sign_up(activityID, ver_code, s1, s2)
+            whitelist_id.append(activityID)
+            time.sleep(30)
+        else:
+            print(f"活动ID {activityID} 在白名单中，跳过报名。")
     else:
-        print("未找到验证码")
-    return verification_code[0]
+        print(f"当前时间尚未达到时间戳 {timestamp}，跳过活动ID: {activityID}。")
 
+def main():
+    while True:
+        activities_data = activities()
+        ID = screening(activities_data)
+        print("可报名活动ID:", ID)
+        
+        # id白名单
+        whitelist_id = []
+        
+        # 时间戳名单
+        time_1 = timestamp_list(activities_data)
+        print("活动开始时间戳:", time_1)
 
+        # 使用线程池同时处理多个活动
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for i in range(len(ID)):
+                activityID = ID[i]
+                timestamp = int(time_1[i])
+                futures.append(executor.submit(process_activity, activityID, timestamp, whitelist_id))
+            
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    print(f"处理活动时发生错误: {exc}")
+
+        print("等待1小时后刷新任务...")
+        time.sleep(3600)
 
 if __name__ == '__main__':
-    activities()
-    ID = screening()
-    print(ID)
-    image()
-    ver_code = code()
-    #id白名单
-    whitelist_id = []
-    #时间戳名单
-    time_1 = timestamp_list()
-    print(time_1)
-    for i in range(len(ID)):
-        activityID = ID[i]
-        print(f"正在处理活动ID: {activityID}")
-        # 遍历时间戳列表
-        timestamp = time_1[i]
-        current_time = int(time.time())  # 获取当前时间戳
-        print(f"当前时间戳: {current_time}")
-        print(f"对应时间戳: {timestamp}")
-        
-        # 检查当前时间是否到达对应时间戳
-        if current_time >= timestamp:
-            print(f"当前时间已达到时间戳 {timestamp}，执行任务")
-            # 检测活动ID是否在白名单中
-            if activityID in whitelist_id:
-                s1, s2 = s1_2()
-                sign_up()
-                whitelist_id.append(activityID)
-            else:
-                print(f"活动ID {activityID} 不在白名单中，跳过报名。")
-        
+    main()
