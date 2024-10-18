@@ -1,3 +1,3 @@
 @echo off
-.venv\Scripts\python.exe e:\GitHub\erke\qiangerke.py
+.venv\Scripts\python.exe .\qiangerke.py
 pause
